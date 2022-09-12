@@ -1,0 +1,43 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  Demo project
+Transform: AWS::Serverless-2016-10-31
+
+Globals:
+  Function:
+    PermissionsBoundary: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${AppId}-${AWS::Region}-PermissionsBoundary'
+    # Layers:
+    #   - !Ref LambdaLayer
+    CodeUri: $CodeUri
+    # Environment:
+    #   Variables:
+    #     'Fn::Transform':
+    #       Name: 'AWS::Include'
+    #       Parameters:
+    #         Location: !Sub 's3://${S3Bucket}/environment.yml'
+
+Parameters:
+  AppId:
+    Type: String
+
+  ENV:
+    Type: String
+    AllowedValues: [dev, qa, prod]
+    Description: Environment in which the application will be deployed. Allowed values [dev, qa, prod]
+  S3Bucket:
+    Type: String
+    Default: <S3Bucket>
+
+Conditions:
+  isQAEnvironment: !Equals [!Ref ENV, qa]
+  isProductionEnvironment: !Equals [!Ref ENV, prod]
+
+Resources:
+  helloWorldLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/hello-world.handler
+      Runtime: nodejs14.x
+      MemorySize: 128
+      Timeout: 60
+      Description: Hello world
