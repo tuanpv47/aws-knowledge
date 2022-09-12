@@ -1,0 +1,117 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  sam-safe-deployment
+
+Globals:
+  Function:
+    Timeout: 30
+
+Resources:
+  sampleFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Runtime: nodejs14.x
+      MemorySize: 128
+      Description: sample function
+      AutoPublishAlias: live
+      DeploymentPreference:
+        Type: Canary50Percent1Minutes
+        Hooks:
+          PreTraffic: !Ref preTrafficHook
+      InlineCode: |
+        exports.handler = async (event) => {
+          return {
+              statusCode: 200,
+              body: 'v1'
+          };
+        };
+
+  preTrafficHook:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      InlineCode: |
+        const AWS = require('aws-sdk');
+        const codedeploy = new AWS.CodeDeploy({apiVersion: '2014-10-06'});
+        var lambda = new AWS.Lambda();
+        exports.handler = (event, context, callback) => {
+
+          console.log("Entering PreTraffic Hook!");
+          console.log(event)
+          // Read the DeploymentId & LifecycleEventHookExecutionId from the event payload
+            var deploymentId = event.DeploymentId;
+          var lifecycleEventHookExecutionId = event.LifecycleEventHookExecutionId;
+
+          var functionToTest = process.env.NewVersion;
+          console.log("Testing new function version: " + functionToTest);
+
+          // Perform validation of the newly deployed Lambda version
+          var lambdaParams = {
+            FunctionName: functionToTest,
+            InvocationType: "RequestResponse"
+          };
+
+          var lambdaResult = "Failed";
+          lambda.invoke(lambdaParams, function(err, data) {
+            console.log(err)
+            console.log(data)
+            if (err){	// an error occurred
+              console.log(err, err.stack);
+              lambdaResult = "Failed";
+            }
+            else{	// successful response
+              lambdaResult = "Succeeded";
+              # if(data && data.FunctionError){
+              #   lambdaResult = "Failed";
+              # }
+              var result = JSON.parse(data.Payload);
+              console.log("Result: " +  JSON.stringify(result));
+
+              
+              // Complete the PreTraffic Hook by sending CodeDeploy the validation status
+              var params = {
+                deploymentId: deploymentId,
+                lifecycleEventHookExecutionId: lifecycleEventHookExecutionId,
+                status: lambdaResult // status can be 'Succeeded' or 'Failed'
+              };
+              
+              // Pass AWS CodeDeploy the prepared validation test results.
+              codedeploy.putLifecycleEventHookExecutionStatus(params, function(err, data) {
+                if (err) {
+                  // Validation failed.
+                  console.log('CodeDeploy Status update failed');
+                  console.log(err, err.stack);
+                  callback("CodeDeploy Status update failed");
+                } else {
+                  // Validation succeeded.
+                  console.log('Codedeploy status updated successfully');
+                  callback(null, 'Codedeploy status updated successfully');
+                }
+              });
+            }  
+          });
+        }
+      Policies:
+        - Version: "2012-10-17"
+          Statement: 
+          - Effect: "Allow"
+            Action: 
+              - "codedeploy:PutLifecycleEventHookExecutionStatus"
+            Resource:
+              !Sub 'arn:aws:codedeploy:${AWS::Region}:${AWS::AccountId}:deploymentgroup:${ServerlessDeploymentApplication}/*'
+        - Version: "2012-10-17"
+          Statement: 
+          - Effect: "Allow"
+            Action: 
+              - "lambda:InvokeFunction"
+            Resource: !Ref sampleFunction.Version
+      Runtime: nodejs14.x
+      FunctionName: 'CodeDeployHook_preTrafficHook'
+      DeploymentPreference:
+        Enabled: false
+      Timeout: 60
+      Environment:
+        Variables:
+          NewVersion: !Ref sampleFunction.Version
