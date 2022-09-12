@@ -1,0 +1,24 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  Demo project
+Transform: AWS::Serverless-2016-10-31
+
+Resources:
+  PackagesLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: node_lambda_layer
+      Description: node_lambda_layer
+      ContentUri: './layer'
+      CompatibleRuntimes:
+        - nodejs14.x
+      LicenseInfo: MIT
+      RetentionPolicy: Retain
+  
+  BasicParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Type: String
+      Name: 'node_lambda_layer_latest'
+      Value: !Ref PackagesLayer
+      Description: SSN parameter for the latest arn of the layer
