@@ -1,0 +1,21 @@
+version: 0.2
+env:
+  variables:
+    "STACK_LAYER_NAME": "STACK_LAYER_NAME"
+    "S3_BUCKET": "S3_BUCKET"
+phases:
+  install:
+    commands:
+      - mkdir -p layer/nodejs
+      - cp package.json layer/nodejs/package.json
+      - cp package-lock.json layer/nodejs/package-lock.json
+      - cd ./layer/nodejs
+      - ls -la
+  pre_build:
+    commands:
+      - npm install --production
+      - cd ../../
+  build:
+    commands:
+      - aws cloudformation package --template lambda-layer.yml --s3-bucket $S3_BUCKET --output-template-file template-export.yml
+      - aws cloudformation deploy --template-file ./template-export.yml --stack-name $STACK_LAYER_NAME --capabilities CAPABILITY_IAM
