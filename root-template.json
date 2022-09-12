@@ -1,0 +1,19 @@
+{
+  "AWSTemplateFormatVersion" : "2010-09-09",
+
+  "Description" : "Demo projects",
+
+  "Resources" : {
+    "lambdaBasicPackage": {
+        "Type": "AWS::Serverless::Function",
+        "Properties": {
+          "Handler": "src/hello-world.handler",
+          "CodeUri": "./",
+          "Description": "lambdaBasicPackage",
+          "MemorySize": "128",
+          "Runtime": "300",
+          "Timeout": "60"
+        }
+    }
+  }
+}
