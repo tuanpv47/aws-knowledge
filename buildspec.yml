@@ -1,0 +1,31 @@
+version: 0.2
+env:
+  variables:
+    "STACK_NAME": "<STACK_NAME>"
+    "ENV": "dev"
+    "TEMPLATE_FILE": "template.yml"
+    "S3_BUCKET": "<S3_BUCKET>"
+phases:
+  install:
+    commands:
+      - npm install --production
+  pre_build:
+    commands:
+      - echo $ENV
+      - echo $TEMPLATE_FILE
+      - cp templates/$ENV/$TEMPLATE_FILE $TEMPLATE_FILE
+  build:
+    commands:
+      # Build
+      - aws cloudformation package --template root-template.json --s3-bucket $S3_BUCKET --output-template-file root-export.json --use-json
+      # - ls -la
+      - CodeUri=$(jq -r '.Resources.lambdaBasicPackage.Properties.CodeUri' root-export.json)
+      - echo $CodeUri
+      - sed 's|$CodeUri|'"$CodeUri"'|g' $TEMPLATE_FILE > template-export.yml
+      - cat template-export.yml
+      # Deploy
+      - aws cloudformation deploy --template-file template-export.yml --stack-name $STACK_NAME --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND --parameter-overrides ENV=$ENV AppId=$STACK_NAME
+# artifacts:
+#   files:
+#     - template-export.yml
+#     - configure.json
