@@ -1,0 +1,119 @@
+version: 2.1
+orbs:
+  docker: circleci/docker@1.7.0
+  aws-s3: circleci/aws-s3@3.0.0
+  aws-ecr: circleci/aws-ecr@8.1.2
+jobs:
+  test-pr:
+    docker:
+      - image: ubuntu:14.04
+    steps:
+      - run: echo "run unit-test!"
+  # STAGING ENVIRONMENT
+  build-deploy-ecr-staing-env:
+    machine:
+      image: ubuntu-2204:2022.04.2
+    steps:
+      - checkout
+      - run:
+          name: Build and Deploy ECR
+          command: |
+            ls -la 
+      - run: docker build -t ripid-be-staging:latest -f "Dockerfile.staging" .
+      - run: docker tag ripid-be-staging:latest $AWS_IMAGE_URI:latest
+      - run: docker images
+      - run: aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com
+      - run: docker push $AWS_IMAGE_URI:latest
+      - run: docker images
+  ssh-and-start-api:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - aws-s3/copy:
+          from: s3://ripid-ssh-keys/ripid-sshkey.pem 
+          to: . 
+      - run: 
+          name: Deploy Over SSH
+          command: |
+            ls -la
+            chmod 600 ripid-sshkey.pem
+            ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -i ripid-sshkey.pem $EC2_USERNAME@$EC2_IP "sudo sh bash-script/ripid-script.sh"
+  
+  # PRODUCTION ENVIRONMENT
+  # build-deploy-ecr-production-env:
+  #   machine:
+  #     image: ubuntu-2204:2022.04.2
+  #   steps:
+  #     - checkout
+  #     - run:
+  #         name: Build and Deploy ECR
+  #         command: |
+  #           ls -la 
+  #     - run: docker build -t ripid-be-production:latest -f "Dockerfile" .
+  #     - run: docker tag ripid-be-production:latest $AWS_IMAGE_URI_PRODUCTION:latest
+  #     - run: docker images
+  #     - run: aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com
+  #     - run: docker push $AWS_IMAGE_URI_PRODUCTION:latest
+  #     - run: docker images
+  deploy-ebs:
+    machine:
+      image: ubuntu-2204:2022.04.2
+    steps:
+      - checkout
+      - run: ls -la
+      - run: 
+          name: Create new application version
+          command: |
+            aws elasticbeanstalk create-application-version --application-name "ripid-be" --version-label $CIRCLE_SHA1 --description commit-$CIRCLE_SHA1 --source-bundle S3Bucket="$AWS_S3Bucket",S3Key="$AWS_S3Key"
+      - run: 
+          name: Deploy ElasticBeanstalk
+          command: |
+            aws elasticbeanstalk update-environment --application-name "ripid-be" --environment-id="$AWS_EBS_ENV_ID" --version-label="$CIRCLE_SHA1"
+
+workflows:
+  version: 2
+  ripid-be:
+    jobs:
+      - test-pr:
+          filters:
+            branches:
+              only:
+                - staging
+                - main
+      - build-deploy-ecr-staing-env:
+          requires:
+            - test-pr
+          filters:
+            branches:
+              only: staging
+      - ssh-and-start-api:
+          requires:
+            - build-deploy-ecr-staing-env
+          context: ripid-cicd
+          filters:
+            branches:
+              only: staging
+      - aws-ecr/build-and-push-image:
+          requires:
+            - test-pr
+          filters:
+            branches:
+              only: main
+          aws-cli-version: latest
+          aws-access-key-id: AWS_ACCESS_KEY
+          aws-secret-access-key: AWS_SECRET_KEY
+          registry-id: AWS_ACCOUNT_ID
+          dockerfile: Dockerfile
+          docker-login: false
+          path: .
+          region: ${REGION}
+          repo: ripid-backend
+          tag: latest
+          platform: linux/amd64
+      - deploy-ebs:
+          requires:
+            - aws-ecr/build-and-push-image
+          context: ripid-cicd
+          filters:
+            branches:
+              only: main
